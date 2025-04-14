@@ -2,20 +2,27 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"log"
-	"os"
+	"net"
 	"strings"
 )
 
 func main() {
-	f, err := os.Open("./messages.txt")
+	listener, err := net.Listen("tcp", ":42069")
 	if err != nil {
 		log.Fatalf("Error opening the file: %v", err)
 	}
-	defer f.Close()
+	defer fmt.Println("Connection has been terminated")
+	defer listener.Close()
 
-	lineChan := getLinesChannel(f)
+	conn, err := listener.Accept()
+	if err != nil {
+		log.Fatalf("Error connecting to TCP listener: %v", err)
+	}
+
+	log.Println("Connection has been established!")
+
+	lineChan := getLinesChannel(conn)
 
 	for line := range lineChan {
 		fmt.Printf("read: %s\n", line)
@@ -23,14 +30,14 @@ func main() {
 
 }
 
-func getLinesChannel(f io.Reader) <-chan string {
+func getLinesChannel(conn net.Conn) <-chan string {
 	line := make(chan string)
 
 	go func() {
 		currLine := ""
 		for {
 			buff := make([]byte, 8)
-			_, err := f.Read(buff)
+			_, err := conn.Read(buff)
 			splitVal := strings.Split(string(buff), "\n")
 			if len(splitVal) == 1 {
 				currLine += splitVal[0]
