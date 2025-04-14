@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"strings"
@@ -25,32 +26,31 @@ func main() {
 	lineChan := getLinesChannel(conn)
 
 	for line := range lineChan {
-		fmt.Printf("read: %s\n", line)
+		fmt.Println(line)
 	}
 
 }
 
-func getLinesChannel(conn net.Conn) <-chan string {
+func getLinesChannel(f io.ReadCloser) <-chan string {
 	line := make(chan string)
-
 	go func() {
+		defer f.Close()
+		defer close(line)
 		currLine := ""
 		for {
 			buff := make([]byte, 8)
-			_, err := conn.Read(buff)
-			splitVal := strings.Split(string(buff), "\n")
-			if len(splitVal) == 1 {
-				currLine += splitVal[0]
-			} else if len(splitVal) == 2 {
-				line <- (currLine + splitVal[0])
-				currLine = splitVal[1]
+			n, err := f.Read(buff)
+			splitVal := strings.Split(string(buff[:n]), "\n")
+			for i := 0; i < len(splitVal)-1; i++ {
+				line <- fmt.Sprintf("%s%s", currLine, splitVal[i])
+				currLine = ""
 			}
+			currLine += splitVal[len(splitVal)-1]
 			if err != nil {
 				break
 			}
 		}
 		line <- currLine
-		close(line)
 	}()
 	return line
 }
