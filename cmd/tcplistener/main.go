@@ -2,10 +2,10 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"net"
-	"strings"
+
+	"github.com/TheBarnakhil/httpfromtcp/internal/request"
 )
 
 func main() {
@@ -23,34 +23,17 @@ func main() {
 
 	log.Println("Connection has been established!")
 
-	lineChan := getLinesChannel(conn)
-
-	for line := range lineChan {
-		fmt.Println(line)
+	req, err := request.RequestFromReader(conn)
+	if err != nil {
+		log.Fatalln(err)
 	}
 
-}
-
-func getLinesChannel(f io.ReadCloser) <-chan string {
-	line := make(chan string)
-	go func() {
-		defer f.Close()
-		defer close(line)
-		currLine := ""
-		for {
-			buff := make([]byte, 8)
-			n, err := f.Read(buff)
-			splitVal := strings.Split(string(buff[:n]), "\n")
-			for i := 0; i < len(splitVal)-1; i++ {
-				line <- fmt.Sprintf("%s%s", currLine, splitVal[i])
-				currLine = ""
-			}
-			currLine += splitVal[len(splitVal)-1]
-			if err != nil {
-				break
-			}
-		}
-		line <- currLine
-	}()
-	return line
+	fmt.Println("Request line:")
+	fmt.Println("- Method:", req.RequestLine.Method)
+	fmt.Println("- Target:", req.RequestLine.RequestTarget)
+	fmt.Println("- Version:", req.RequestLine.HttpVersion)
+	fmt.Println("Headers:")
+	for key, val := range req.Headers {
+		fmt.Printf("- %s: %s\n", key, val)
+	}
 }
