@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -15,6 +17,7 @@ type Request struct {
 	RequestLine RequestLine
 	ParserState internal
 	Headers     headers.Headers
+	Body        []byte
 }
 
 type RequestLine struct {
@@ -31,6 +34,7 @@ const (
 	Initialized internal = iota
 	Done
 	ParsingHeaders
+	ParsingBody
 )
 
 const bufferLen = 8
@@ -65,7 +69,7 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 		readToIndex += numBytesRead
 		parsedNum, err := req.parse(buffer[:readToIndex])
 		if err != nil {
-			return req, errors.New("error: Unable to parse from buffer")
+			return req, errors.New("error: Unable to parse from buffer " + err.Error())
 		}
 		copy(buffer, buffer[parsedNum:])
 		readToIndex -= parsedNum
@@ -160,9 +164,28 @@ func (r *Request) parseSingle(data []byte) (int, error) {
 			return 0, err
 		}
 		if done {
-			r.ParserState = Done
+			r.ParserState = ParsingBody
 		}
 		return n, nil
+	case ParsingBody:
+		valString, ok := r.Headers.Get("Content-Length")
+		if !ok {
+			r.ParserState = Done
+			return len(data), nil
+		}
+		log.Println(valString, "val", string(data))
+		size, err := strconv.Atoi(valString)
+		if err != nil {
+			return 0, fmt.Errorf("error: Invalid value (%s) in request header: %w", valString, err)
+		}
+		r.Body = append(r.Body, data...)
+		if len(r.Body) > size {
+			return 0, errors.New("error: Request body is bigger than specified in header")
+		}
+		if len(r.Body) == size {
+			r.ParserState = Done
+		}
+		return len(data), nil
 	case Done:
 		return 0, fmt.Errorf("error: trying to read data in a done state")
 	default:

@@ -3,7 +3,7 @@ package headers
 import (
 	"bytes"
 	"errors"
-	"log"
+	"strings"
 	"unicode"
 )
 
@@ -23,7 +23,6 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 	data = data[:idx]
 
 	keyVal := bytes.SplitN(data, []byte(":"), 2)
-	log.Println(keyVal)
 	if len(keyVal) != 2 {
 		return 0, false, errors.New("error: Found no ':' in the header")
 	}
@@ -55,4 +54,9 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 
 func NewHeaders() Headers {
 	return Headers{}
+}
+
+func (h Headers) Get(key string) (string, bool) {
+	v, ok := h[strings.ToLower(key)]
+	return v, ok
 }
