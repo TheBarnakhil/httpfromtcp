@@ -1,27 +1,35 @@
 package server
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"log"
 	"net"
 	"sync/atomic"
 
+	"github.com/TheBarnakhil/httpfromtcp/internal/request"
 	"github.com/TheBarnakhil/httpfromtcp/internal/response"
 )
 
 type Server struct {
-	Listener net.Listener
-	Open     atomic.Bool
+	Listener    net.Listener
+	Open        atomic.Bool
+	HandlerFunc Handler
 }
 
-func Serve(port int) (*Server, error) {
+type HandlerError struct {
+	StatusCode response.StatusCode
+	Message    string
+}
+
+type Handler func(w *response.Writer, req *request.Request)
+
+func Serve(port int, handlerFunc Handler) (*Server, error) {
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		return &Server{}, errors.New("error: Error creating a listener")
 	}
-	server := Server{Listener: listener}
+	server := Server{Listener: listener, HandlerFunc: handlerFunc}
 	server.Open.Store(true)
 	go server.listen()
 	return &server, nil
@@ -47,11 +55,38 @@ func (s *Server) listen() {
 
 func (s *Server) handle(conn net.Conn) {
 	defer conn.Close()
-	req := []byte{}
-	buff := bytes.NewBuffer(req)
-	response.WriteStatusLine(buff, 200)
-	response.WriteHeaders(buff, response.GetDefaultHeaders(0))
 
-	res := buff.String() + "\r\n" + "Hello World!"
-	conn.Write([]byte(res))
+	writer := response.Writer{}
+
+	req, err := request.RequestFromReader(conn)
+	if err != nil {
+		hErr := &HandlerError{
+			StatusCode: response.BadRequest,
+			Message: fmt.Sprintf(`
+		<html>
+  <head>
+    <title>500 Internal Server Error</title>
+  </head>
+  <body>
+    <h1>Internal Server Error</h1>
+    <p>Okay, you know what? This one is on me. %v</p>
+  </body>
+</html>
+		`, err),
+		}
+		hErr.writeHandlerErrortoWriter(&writer)
+	}
+	s.HandlerFunc(&writer, req)
+
+	conn.Write(writer.StatusLine)
+	conn.Write(writer.Headers)
+	conn.Write(writer.Body)
+}
+
+func (h HandlerError) writeHandlerErrortoWriter(w *response.Writer) {
+	w.WriteStatusLine(h.StatusCode)
+	messageBytes := []byte(h.Message)
+	headers := response.GetDefaultHeaders(len(messageBytes), response.HTML)
+	w.WriteHeaders(headers)
+	w.WriteBody(messageBytes)
 }
