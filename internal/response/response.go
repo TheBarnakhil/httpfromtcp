@@ -3,6 +3,7 @@ package response
 import (
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 
 	"github.com/TheBarnakhil/httpfromtcp/internal/headers"
@@ -23,14 +24,20 @@ const (
 	StatusLineNext WriterState = iota
 	HeadersNext
 	BodyNext
+	TrailersNext
 	Done
 )
 
 type Writer struct {
-	StatusLine  []byte
-	Headers     []byte
-	Body        []byte
 	writerState WriterState
+	writer      io.Writer
+}
+
+func NewWriter(w io.Writer) *Writer {
+	return &Writer{
+		writerState: StatusLineNext,
+		writer:      w,
+	}
 }
 
 const (
@@ -46,15 +53,24 @@ func (w *Writer) WriteStatusLine(statusCode StatusCode) error {
 
 	switch statusCode {
 	case OK:
-		w.StatusLine = []byte("HTTP/1.1 200 OK\r\n")
+		_, err := w.writer.Write([]byte("HTTP/1.1 200 OK\r\n"))
+		if err != nil {
+			return err
+		}
 		w.writerState = HeadersNext
 		return nil
 	case BadRequest:
-		w.StatusLine = []byte("HTTP/1.1 400 Bad Request\r\n")
+		_, err := w.writer.Write([]byte("HTTP/1.1 400 Bad Request\r\n"))
+		if err != nil {
+			return err
+		}
 		w.writerState = HeadersNext
 		return nil
 	case ServerError:
-		w.StatusLine = []byte("HTTP/1.1 500 Internal Server Error\r\n")
+		_, err := w.writer.Write([]byte("HTTP/1.1 500 Internal Server Error\r\n"))
+		if err != nil {
+			return err
+		}
 		w.writerState = HeadersNext
 		return nil
 	default:
@@ -82,7 +98,10 @@ func (w *Writer) WriteHeaders(headers headers.Headers) error {
 	for key, val := range headers {
 		headerStr += fmt.Sprintf("%s: %s\r\n", key, val)
 	}
-	w.Headers = []byte(headerStr + "\r\n")
+	_, err := w.writer.Write([]byte(headerStr + "\r\n"))
+	if err != nil {
+		return err
+	}
 	w.writerState = BodyNext
 	return nil
 }
@@ -91,7 +110,63 @@ func (w *Writer) WriteBody(p []byte) (int, error) {
 	if w.writerState != BodyNext {
 		return 0, errors.New("error: add the status line then the headers and then the body")
 	}
-	w.Body = p
+	n, err := w.writer.Write(p)
+	if err != nil {
+		return 0, err
+	}
 	w.writerState = Done
-	return len(p), nil
+	return n, nil
+}
+
+func (w *Writer) WriteChunkedBody(p []byte) (int, error) {
+	if w.writerState != BodyNext {
+		return 0, errors.New("error: add the status line then the headers and then the body")
+	}
+	n1, err := w.writer.Write([]byte(strconv.FormatInt(int64(len(p)), 16) + "\r\n"))
+	if err != nil {
+		return 0, err
+	}
+	n2, err := w.writer.Write([]byte(p))
+	if err != nil {
+		return n1, err
+	}
+	n3, err := w.writer.Write([]byte("\r\n"))
+	if err != nil {
+		return n1 + n2, err
+	}
+	return n1 + n2 + n3, nil
+}
+
+func (w *Writer) WriteChunkedBodyDone() (int, error) {
+	if w.writerState != BodyNext {
+		return 0, errors.New("error: add the status line then the headers and then the body")
+	}
+	n, err := w.writer.Write([]byte("0" + "\r\n"))
+	if err != nil {
+		return 0, err
+	}
+	w.writerState = TrailersNext
+	return n, nil
+}
+
+func (w *Writer) WriteTrailers(h headers.Headers) error {
+	if w.writerState != TrailersNext {
+		return errors.New("error: add the status line then the headers and then the body")
+	}
+	if len(h) != 0 {
+		headerStr := ""
+		for key, val := range h {
+			headerStr += fmt.Sprintf("%s: %s\r\n", key, val)
+		}
+		_, err := w.writer.Write([]byte(headerStr))
+		if err != nil {
+			return err
+		}
+	}
+	_, err := w.writer.Write([]byte("\r\n"))
+	if err != nil {
+		return err
+	}
+	w.writerState = Done
+	return nil
 }

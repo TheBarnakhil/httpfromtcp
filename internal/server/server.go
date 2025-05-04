@@ -56,7 +56,7 @@ func (s *Server) listen() {
 func (s *Server) handle(conn net.Conn) {
 	defer conn.Close()
 
-	writer := response.Writer{}
+	writer := response.NewWriter(conn)
 
 	req, err := request.RequestFromReader(conn)
 	if err != nil {
@@ -74,13 +74,9 @@ func (s *Server) handle(conn net.Conn) {
 </html>
 		`, err),
 		}
-		hErr.writeHandlerErrortoWriter(&writer)
+		hErr.writeHandlerErrortoWriter(writer)
 	}
-	s.HandlerFunc(&writer, req)
-
-	conn.Write(writer.StatusLine)
-	conn.Write(writer.Headers)
-	conn.Write(writer.Body)
+	s.HandlerFunc(writer, req)
 }
 
 func (h HandlerError) writeHandlerErrortoWriter(w *response.Writer) {
