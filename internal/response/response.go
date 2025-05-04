@@ -18,6 +18,7 @@ type ContentType string
 const (
 	Plain ContentType = "text/plain"
 	HTML  ContentType = "text/html"
+	Video ContentType = "video/mp4"
 )
 
 const (

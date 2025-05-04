@@ -37,55 +37,7 @@ func main() {
 func handler(w *response.Writer, req *request.Request) {
 
 	if strings.HasPrefix(req.RequestLine.RequestTarget, "/httpbin") {
-		route := strings.TrimPrefix(req.RequestLine.RequestTarget, "/httpbin")
-
-		resp, err := http.Get("https://httpbin.org" + route)
-		if err != nil {
-			handler400(w, req)
-		}
-		defer resp.Body.Close()
-
-		w.WriteStatusLine(response.OK)
-		h := response.GetDefaultHeaders(0, response.Plain)
-		delete(h, "Content-Length")
-		h["Transfer-Encoding"] = "chunked"
-		err = w.WriteHeaders(h)
-		if err != nil {
-			fmt.Println("error in writing headers: ", err)
-			return
-		}
-
-		buff := make([]byte, 1024)
-		var body []byte
-		for {
-			n, err := resp.Body.Read(buff)
-			body = append(body, buff[:n]...)
-			fmt.Println("Read", n, "bytes")
-			if n > 0 {
-				_, err := w.WriteChunkedBody(buff[:n])
-				if err != nil {
-					fmt.Println("Error writing chunked body: ", err)
-					return
-				}
-			}
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				fmt.Println("Error reading response body:", err)
-				break
-			}
-		}
-		_, err = w.WriteChunkedBodyDone()
-		if err != nil {
-			fmt.Println("Error writing chunked body done: ", err)
-		}
-
-		h = headers.NewHeaders()
-		h["Trailer"] = "X-Content-SHA256, X-Content-Length"
-		h["X-Content-SHA256"] = fmt.Sprintf("%x", sha256.Sum256(body))
-		h["X-Content-Length"] = strconv.Itoa(len(body))
-		w.WriteTrailers(h)
+		proxyHandler(w, req)
 	}
 
 	switch req.RequestLine.RequestTarget {
@@ -94,6 +46,15 @@ func handler(w *response.Writer, req *request.Request) {
 		return
 	case "/myproblem":
 		handler500(w, req)
+	case "/video":
+		content, err := os.ReadFile("../../assets/vim.mp4")
+		if err != nil {
+			fmt.Println("Error reading file: ", err)
+		}
+		w.WriteStatusLine(response.OK)
+		headers := response.GetDefaultHeaders(len(content), response.Video)
+		w.WriteHeaders(headers)
+		w.WriteBody([]byte(content))
 	default:
 		handler200(w, req)
 	}
@@ -151,4 +112,56 @@ func handler200(w *response.Writer, _ *request.Request) {
 	headers := response.GetDefaultHeaders(len(content), response.HTML)
 	w.WriteHeaders(headers)
 	w.WriteBody([]byte(content))
+}
+
+func proxyHandler(w *response.Writer, req *request.Request) {
+	route := strings.TrimPrefix(req.RequestLine.RequestTarget, "/httpbin")
+
+	resp, err := http.Get("https://httpbin.org" + route)
+	if err != nil {
+		handler400(w, req)
+	}
+	defer resp.Body.Close()
+
+	w.WriteStatusLine(response.OK)
+	h := response.GetDefaultHeaders(0, response.Plain)
+	delete(h, "Content-Length")
+	h["Transfer-Encoding"] = "chunked"
+	err = w.WriteHeaders(h)
+	if err != nil {
+		fmt.Println("error in writing headers: ", err)
+		return
+	}
+
+	buff := make([]byte, 1024)
+	var body []byte
+	for {
+		n, err := resp.Body.Read(buff)
+		body = append(body, buff[:n]...)
+		fmt.Println("Read", n, "bytes")
+		if n > 0 {
+			_, err := w.WriteChunkedBody(buff[:n])
+			if err != nil {
+				fmt.Println("Error writing chunked body: ", err)
+				return
+			}
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			fmt.Println("Error reading response body:", err)
+			break
+		}
+	}
+	_, err = w.WriteChunkedBodyDone()
+	if err != nil {
+		fmt.Println("Error writing chunked body done: ", err)
+	}
+
+	h = headers.NewHeaders()
+	h["Trailer"] = "X-Content-SHA256, X-Content-Length"
+	h["X-Content-SHA256"] = fmt.Sprintf("%x", sha256.Sum256(body))
+	h["X-Content-Length"] = strconv.Itoa(len(body))
+	w.WriteTrailers(h)
 }
